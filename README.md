@@ -1,2 +1,2 @@
-# ozonParc
+# ozonParcer
 Парсер по SKU, Наименованию, Рейтингу
