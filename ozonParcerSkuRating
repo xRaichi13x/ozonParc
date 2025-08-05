@@ -1,0 +1,181 @@
+import requests
+import pandas as pd
+from time import sleep
+from tqdm import tqdm
+
+# Конфигурация
+CLIENT_ID = "11777"
+API_KEY = "e7e82435-cf0b-4e52-a12d-b728cade1ad7"
+HEADERS = {
+    "Client-Id": CLIENT_ID,
+    "Api-Key": API_KEY,
+    "Content-Type": "application/json",
+}
+
+
+def get_all_products():
+    """Получение списка всех товаров с product_id"""
+    products = []
+    last_id = ""
+    limit = 1000
+
+    with tqdm(desc="Получение товаров") as pbar:
+        while True:
+            data = {
+                "filter": {},
+                "limit": limit,
+                "visibility": "ALL",
+                "last_id": last_id,
+            }
+
+            response = requests.post(
+                "https://api-seller.ozon.ru/v3/product/list", headers=HEADERS, json=data
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                items = result.get("result", {}).get("items", [])
+
+                if not items:
+                    break
+
+                # save product_id и offer_id
+                for item in items:
+                    if item.get("product_id"):
+                        products.append(
+                            {
+                                "product_id": str(item["product_id"]),
+                                "offer_id": str(item.get("offer_id", "")),
+                            }
+                        )
+
+                pbar.update(len(items))
+                last_id = result.get("result", {}).get("last_id", "")
+
+                if not last_id:
+                    break
+            else:
+                print(f"Ошибка {response.status_code}: {response.text}")
+                break
+
+            sleep(1)
+
+    return products
+
+    """Получение полной информации о товарах по product_id"""
+
+
+def get_products_info(product_ids):
+    products_info = []
+    chunk_size = 1000  # Лимит API
+
+    with tqdm(total=len(product_ids), desc="Получение SKU") as pbar:
+        for i in range(0, len(product_ids), chunk_size):
+            chunk = product_ids[i : i + chunk_size]
+            data = {"product_id": chunk}
+
+            response = requests.post(
+                "https://api-seller.ozon.ru/v3/product/info/list",
+                headers=HEADERS,
+                json=data,
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                for item in result.get("items", []):
+                    # Получаем первый доступный sku из sources или stocks
+                    sku = None
+                    if item.get("sources"):
+                        sku = item["sources"][0].get("sku")
+                    elif item.get("stocks") and item["stocks"].get("stocks"):
+                        sku = item["stocks"]["stocks"][0].get("sku")
+
+                    products_info.append(
+                        {
+                            "product_id": str(item.get("id", "")),
+                            "offer_id": item.get("offer_id", ""),
+                            "sku": str(sku) if sku else None,
+                            "created_at": item.get("created_at", ""),
+                            "updated_at": item.get("updated_at", ""),
+                        }
+                    )
+            else:
+                print(f"Ошибка {response.status_code}: {response.text}")
+
+            pbar.update(len(chunk))
+            sleep(1)
+
+    return products_info
+
+
+def get_ratings(sku_list):
+    """Получение рейтингов по SKU"""
+    ratings = {}
+    chunk_size = 100  # Лимит API
+
+    with tqdm(total=len(sku_list), desc="Получение рейтингов") as pbar:
+        for i in range(0, len(sku_list), chunk_size):
+            chunk = sku_list[i : i + chunk_size]
+            data = {"skus": chunk}
+
+            response = requests.post(
+                "https://api-seller.ozon.ru/v1/product/rating-by-sku",
+                headers=HEADERS,
+                json=data,
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                for product in result.get("products", []):
+                    sku = str(product.get("sku", ""))
+                    ratings[sku] = product.get("rating")
+            else:
+                print(f"Ошибка {response.status_code}: {response.text}")
+
+            pbar.update(len(chunk))
+            sleep(1.5)
+
+    return ratings
+
+
+def save_to_excel(products_info, ratings):
+    """Сохранение данных в Excel"""
+    df = pd.DataFrame(products_info)
+
+    # Добавляем рейтинги по SKU
+    df["rating"] = df["sku"].map(ratings)
+
+    # Удаляем товары без SKU или рейтинга
+    df = df[df["sku"].notna() & df["rating"].notna()]
+
+    # Выбираем только нужные колонки
+    df = df[["product_id", "offer_id", "sku", "rating", "created_at", "updated_at"]]
+
+    # Сохраняем в Excel
+    df.to_excel("Ozon_Products_Full_Info.xlsx", index=False)
+    print(f"✅ Сохранено {len(df)} товаров с полной информацией")
+
+
+def main():
+    print("🔄 Получение данных...")
+
+    # 1. Получаем список всех товаров
+    products = get_all_products()
+    if not products:
+        print("❌ Товары не получены")
+        return
+
+    # 2. Получаем полную информацию о товарах (включая SKU)
+    product_ids = [p["product_id"] for p in products]
+    products_info = get_products_info(product_ids)
+
+    # 3. Получаем рейтинги по SKU
+    valid_skus = [p["sku"] for p in products_info if p.get("sku")]
+    ratings = get_ratings(valid_skus)
+
+    # 4. Сохраняем в Excel
+    save_to_excel(products_info, ratings)
+
+
+if __name__ == "__main__":
+    main()
