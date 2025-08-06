@@ -4,8 +4,8 @@ from time import sleep
 from tqdm import tqdm
 
 # Конфигурация
-CLIENT_ID = "11777"
-API_KEY = "e7e82435-cf0b-4e52-a12d-b728cade1ad7"
+CLIENT_ID = "" добавь свой клиент_ид
+API_KEY = "" # добавь токен
 HEADERS = {
     "Client-Id": CLIENT_ID,
     "Api-Key": API_KEY,
